@@ -3,16 +3,20 @@
  */
 
 // Pin connected to ST_CP of 74HC595
-int gridLatchPin = 0;
-int tallyLatchPin = 23;
+int gridLatchPin = 6;
+int tallyLatchPin = 10;
 
 // Pin connected to SH_CP of 74HC595
-int gridClockPin = 1;
-int tallyClockPin = 22;
+int gridClockPin = 5;
+int tallyClockPin = 9;
 
 //// Pin connected to DS of 74HC595
-int gridDataPin = 2;
-int tallyDataPin = 21;
+int gridDataPin = 4;
+int tallyDataPin = 8;
+
+//// Pins connected to OE
+int gridOutputEnable = 7;
+int tallyOutputEnable = 11;
 
 //// Variable contains the 64bit number to be displayed on the grid
 uint64_t gridState = 0x0001;
@@ -28,13 +32,19 @@ void setup() {
   pinMode(gridClockPin, OUTPUT);
   pinMode(gridDataPin, OUTPUT);
   
+  pinMode(gridOutputEnable, OUTPUT);
+  digitalWrite(gridOutputEnable, LOW);
+  
   pinMode(tallyLatchPin, OUTPUT);
   pinMode(tallyClockPin, OUTPUT);
   pinMode(tallyDataPin, OUTPUT);
+  
+  pinMode(tallyOutputEnable, OUTPUT);
+  digitalWrite(tallyOutputEnable, LOW);
 
-  onTimer.begin(refreshGrid, 1000);
+  onTimer.begin(refreshGrid, 1e4);
   delayMicroseconds(800);
-  offTimer.begin(endTx, 1000);
+  offTimer.begin(endTx, 1e4);
 }
 
 void loop() {
