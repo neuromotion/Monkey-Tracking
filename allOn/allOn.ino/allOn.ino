@@ -31,8 +31,8 @@ IntervalTimer offTimer;
 void setup() {
   // put your setup code here, to run once:
   memset(gridState,0,sizeof(gridState));
-  gridState[0] = 1;
-  memset(tallyBin, 0, sizeof(tallyBin));
+  gridState[currentGridBlock] = 255;
+  memset(tallyBin,255, sizeof(tallyBin));
   
   pinMode(gridLatchPin, OUTPUT);
   pinMode(gridClockPin, OUTPUT);
@@ -47,10 +47,10 @@ void setup() {
   
   pinMode(tallyOutputEnable, OUTPUT);
   digitalWrite(tallyOutputEnable, LOW);
-  
-  onTimer.begin(refreshGrid, 1e3);
-  delayMicroseconds(5e2);
-  offTimer.begin(endTx, 1e3);
+
+  onTimer.begin(refreshGrid, 1e6);
+  delayMicroseconds(5000);
+  offTimer.begin(endTx, 1e6);
 }
 
 void loop() {
@@ -73,23 +73,6 @@ void refreshGrid(void)
   //shift the clock out
   for (i = 0; i < sizeof(tallyBin); i++) {
     shiftOut(tallyDataPin, tallyClockPin, LSBFIRST, tallyBin[i]);
-  }
-  
-  if (gridState[currentGridBlock] == 0){
-    // shift to the next block
-    currentGridBlock++;
-    gridState[currentGridBlock] = 1;
-  }
-  else {
-    //increment the grid
-    gridState[currentGridBlock] = gridState[currentGridBlock] << 1; 
-  }
-  
-  if (currentGridBlock == sizeof(gridState)){
-    currentGridBlock = 0;
-    tally++;
-    tallyBin[0] = highByte(tally);
-    tallyBin[1] = lowByte(tally);
   }
   
   digitalWrite(gridDataPin, LOW);

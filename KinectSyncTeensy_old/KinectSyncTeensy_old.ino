@@ -19,10 +19,8 @@ int gridOutputEnable = 7;
 int tallyOutputEnable = 11;
 
 //// Variable contains the 64bit number to be displayed on the grid
-int currentGridBlock = 0;
 uint8_t gridState[12];
-int tally = 0;
-uint8_t tallyBin[2];
+uint8_t tally[2];
 
 //// Timer Variable Create an IntervalTimer object 
 IntervalTimer onTimer;
@@ -30,10 +28,6 @@ IntervalTimer offTimer;
 
 void setup() {
   // put your setup code here, to run once:
-  memset(gridState,0,sizeof(gridState));
-  gridState[0] = 1;
-  memset(tallyBin, 0, sizeof(tallyBin));
-  
   pinMode(gridLatchPin, OUTPUT);
   pinMode(gridClockPin, OUTPUT);
   pinMode(gridDataPin, OUTPUT);
@@ -47,15 +41,34 @@ void setup() {
   
   pinMode(tallyOutputEnable, OUTPUT);
   digitalWrite(tallyOutputEnable, LOW);
-  
-  onTimer.begin(refreshGrid, 1e3);
-  delayMicroseconds(5e2);
-  offTimer.begin(endTx, 1e3);
+
+  onTimer.begin(refreshGrid, 2e6);
+  delayMicroseconds(250);
+  offTimer.begin(endTx, 2e6);
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
 }
+
+void longLongShiftOut(uint8_t dataPin, uint8_t clockPin, uint8_t bitOrder, uint64_t val)
+{
+  uint8_t i;
+  
+  for (i = 0; i < 64; i++)  {
+    
+    if (bitOrder == LSBFIRST){
+      digitalWrite(dataPin, !!(val & (1LL << i)));
+    }
+    else{
+      digitalWrite(dataPin, !!(val & (1LL << (63 - i))));
+    }
+      
+    digitalWrite(clockPin, HIGH);
+    digitalWrite(clockPin, LOW);    
+  }
+}
+// Interrupt is called once a millisecond, looks for any new GPS data, and stores it
 
 void refreshGrid(void)
 {
@@ -65,31 +78,16 @@ void refreshGrid(void)
   digitalWrite(gridLatchPin, LOW);
   digitalWrite(tallyLatchPin, LOW);
 
+  //increment the grid
+  gridState = gridState << 1;
   //shift the grid state out
-  int i;
-  for (i = 0; i < sizeof(gridState); i++) {
-    shiftOut(gridDataPin, gridClockPin, LSBFIRST, gridState[i]);
-  }
+  longLongShiftOut(gridDataPin, gridClockPin, LSBFIRST, gridState);
   //shift the clock out
-  for (i = 0; i < sizeof(tallyBin); i++) {
-    shiftOut(tallyDataPin, tallyClockPin, LSBFIRST, tallyBin[i]);
-  }
+  shiftOut(tallyDataPin, tallyClockPin, LSBFIRST, tally);
   
-  if (gridState[currentGridBlock] == 0){
-    // shift to the next block
-    currentGridBlock++;
-    gridState[currentGridBlock] = 1;
-  }
-  else {
-    //increment the grid
-    gridState[currentGridBlock] = gridState[currentGridBlock] << 1; 
-  }
-  
-  if (currentGridBlock == sizeof(gridState)){
-    currentGridBlock = 0;
+  if (gridState == 0){
+    gridState = 0x0001;
     tally++;
-    tallyBin[0] = highByte(tally);
-    tallyBin[1] = lowByte(tally);
   }
   
   digitalWrite(gridDataPin, LOW);
