@@ -47,9 +47,9 @@ void setup() {
   
   pinMode(tallyOutputEnable, OUTPUT);
   digitalWrite(tallyOutputEnable, LOW);
-  
+
   onTimer.begin(refreshGrid, 1e3);
-  delayMicroseconds(5e2);
+  delayMicroseconds(800);
   offTimer.begin(endTx, 1e3);
 }
 
