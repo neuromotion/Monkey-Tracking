@@ -2,6 +2,7 @@
  * Code to drive an array of LEDs in order to synchronize Kinect recordings to neural data
  */
 
+bool debugging = 1;
 // Pin connected to ST_CP of 74HC595
 int gridLatchPin = 6;
 int tallyLatchPin = 10;
@@ -25,10 +26,15 @@ int tally = 0;
 uint8_t tallyBin[2];
 
 //// Timer Variable Create an IntervalTimer object 
+int startInterruptPin = 32;
 IntervalTimer onTimer;
 IntervalTimer offTimer;
 
 void setup() {
+  if (debugging) {
+    Serial.begin(9600);      // open the serial port at 9600 bps: 
+  }
+  
   // put your setup code here, to run once:
   memset(gridState,0,sizeof(gridState));
   gridState[0] = 1;
@@ -48,13 +54,59 @@ void setup() {
   pinMode(tallyOutputEnable, OUTPUT);
   digitalWrite(tallyOutputEnable, LOW);
 
-  onTimer.begin(refreshGrid, 1e3);
-  delayMicroseconds(800);
-  offTimer.begin(endTx, 1e3);
+  startDisplay();
+  //pinMode(startInterruptPin, INPUT_PULLUP); // sets the digital pin as output
+  //digitalWrite(startInterruptPin, HIGH);
+  //attachInterrupt(startInterruptPin, startDisplay, FALLING); // interrrupt 1 is data ready
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
+}
+
+void startDisplay(void){
+  Serial.println("Starting timed interrupts...");
+  
+  int i,j;
+  
+  uint8_t flash = 255;
+  // Light all LEDs
+    
+  for (j = 0; j < 4; j++) {
+    digitalWrite(gridLatchPin, LOW);
+    digitalWrite(tallyLatchPin, LOW);
+    
+    for (i = 0; i < 2; i++) {
+      shiftOut(tallyDataPin, tallyClockPin, LSBFIRST, flash);
+    }
+    for (i = 0; i < 12; i++) {
+      shiftOut(gridDataPin, gridClockPin, LSBFIRST, flash);
+    }
+  
+    //take the latch pin high so the LEDs will light up:
+    digitalWrite(gridLatchPin, HIGH);
+    digitalWrite(tallyLatchPin, HIGH);
+  
+    digitalWrite(gridDataPin, LOW);
+    digitalWrite(tallyDataPin, LOW);
+
+    if (flash == 255) {
+      flash = 0;
+    }
+    else if (flash == 0)
+    {
+      flash = 255;
+    }
+  
+    delay(1000);
+    
+    Serial.println(j);
+  }
+  
+  onTimer.begin(refreshGrid, 0.9e3);
+  delayMicroseconds(500);
+  offTimer.begin(endTx, 0.9e3);
+
 }
 
 void refreshGrid(void)
