@@ -32,9 +32,9 @@ void setup() {
   pinMode(tallyClockPin, OUTPUT);
   pinMode(tallyDataPin, OUTPUT);
 
-  onTimer.begin(refreshGrid, 1000);
-  delayMicroseconds(800);
-  offTimer.begin(endTx, 1000);
+  onTimer.begin(refreshGrid, 1000e2);
+  delayMicroseconds(800e2);
+  offTimer.begin(endTx, 1000e2);
 }
 
 void loop() {
