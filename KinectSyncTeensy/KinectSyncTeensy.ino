@@ -117,6 +117,12 @@ void refreshGrid(void)
   digitalWrite(gridLatchPin, LOW);
   digitalWrite(tallyLatchPin, LOW);
 
+  if (gridState[currentGridBlock] == 0){
+    // shift to the next block
+    currentGridBlock++;
+    gridState[currentGridBlock] = 1;
+  }
+  
   //shift the grid state out
   int i;
   for (i = 0; i < sizeof(gridState); i++) {
@@ -127,18 +133,12 @@ void refreshGrid(void)
     shiftOut(tallyDataPin, tallyClockPin, LSBFIRST, tallyBin[i]);
   }
   
-  if (gridState[currentGridBlock] == 0){
-    // shift to the next block
-    currentGridBlock++;
-    gridState[currentGridBlock] = 1;
-  }
-  else {
-    //increment the grid
-    gridState[currentGridBlock] = gridState[currentGridBlock] << 1; 
-  }
-  
+  //increment the grid
+  gridState[currentGridBlock] = gridState[currentGridBlock] << 1; 
+    
   if (currentGridBlock == sizeof(gridState)){
     currentGridBlock = 0;
+    gridState[currentGridBlock] = 1;
     tally++;
     tallyBin[0] = highByte(tally);
     tallyBin[1] = lowByte(tally);
