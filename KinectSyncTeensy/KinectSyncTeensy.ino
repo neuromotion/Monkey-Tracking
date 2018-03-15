@@ -136,7 +136,7 @@ void refreshGrid(void)
   //increment the grid
   gridState[currentGridBlock] = gridState[currentGridBlock] << 1; 
     
-  if (currentGridBlock == sizeof(gridState) - 1){
+  if (currentGridBlock == (sizeof(gridState) -1) && gridState[currentGridBlock] == 0){
     currentGridBlock = 0;
     gridState[currentGridBlock] = 1;
     tally++;
