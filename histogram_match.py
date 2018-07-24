@@ -5,8 +5,12 @@ from mpi4py import MPI
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from matplotlib import pyplot as plt
-from Tkinter import Tk
-from tkFileDialog import askopenfilenames, askopenfilename, asksaveasfilename
+
+#Python 2 legacy code:
+#from Tkinter import Tk
+#from tkFileDialog import askopenfilenames, askopenfilename, asksaveasfilename
+from tkinter import filedialog
+from tkinter import *
 from PIL import Image
 
 NONE = 0
@@ -15,14 +19,16 @@ ORIGINAL_BACKPROJECTED = 2
 BACKPROJECTED_PLUS = 3
 BACKPROJECTED_ALT = 4
 THRESHOLDED_BACKPROJECTED = 5
+CLAHE_CLIPLIMIT = 4
 
 COMM = MPI.COMM_WORLD
 SIZE = COMM.Get_size()
 RANK = COMM.Get_rank()
 
-def getHSHistogram(templatePath, lowerValBound = 25, plotting = False):
+def getHSHistogram(templatePath, lowerValBound = 50, plotting = False, plotName = ''):
     # get image which contains cutouts of the markers
     imgTemplate = cv2.imread(templatePath)
+
     imgTemplateHSV = cv2.cvtColor(imgTemplate,cv2.COLOR_BGR2HSV)
 
     # create a mask
@@ -54,6 +60,7 @@ def getHSHistogram(templatePath, lowerValBound = 25, plotting = False):
             linewidth=.1, antialiased=True)
         plt.xlabel('Saturation')
         plt.ylabel('Hue')
+        plt.title(plotName)
         plt.show()
 
     #pdb.set_trace()
@@ -65,7 +72,7 @@ def openVideo(filePath):
     success = capVideo.open(filePath)
 
     if capVideo.isOpened() == False:            # check if VideoCapture object was associated to webcam successfully
-        print "error: Video not accessed successfully\n\n"          # if not, print error message to std out
+        print("error: Video not accessed successfully\n\n")          # if not, print error message to std out
         os.system("pause")                                              # pause until user presses a key so user can see error message
         return                                                          # and exit function (which exits program)
     return capVideo
@@ -74,7 +81,7 @@ def getTupleOfFiles(filePath, defaultFile = ' ', message = "Please choose file(s
     # get filename
     root = Tk()
     root.withdraw() # we don't want a full GUI, so keep the root window from appearing
-    filename_all = askopenfilenames(parent = root, title = message, initialdir = filePath) # open window to get file name
+    filename_all = filedialog.askopenfilenames(parent = root, title = message, initialdir = filePath) # open window to get file name
 
     if not filename_all: # if file not selected, select a default
         filename_all = (defaultFile,)
@@ -104,16 +111,19 @@ def tileStills(filePath = 'D:/Sensitive_Data'):
         imgCurrent = Image.open(filename)
         imgTile.paste(imgCurrent, (0, top))
         top += height
-    imgTile.save(filename_path + "tiledTemplate-" + cameraNo + ".png")
+    imgTile.save(filename_path + "tiledTemplate-" + cameraNo + ".bmp")
 
-def getNRandomStills(n = 10):
-    filename_all, filename_path = getTupleOfFiles('D:/Sensitive_Data','D:/Sensitive_Data/201609191116-Boomer_Predox_Baseline_Treadmill/decrypt/201609191116-Boomer_Predox_Baseline_Treadmill_Ultraviolet_10-1.avi', message = "Which file would you like stills from?")
+def getNRandomStills(n = 10, gammaValue = 1, equalizeFrame = False):
+    filename_all, filename_path = getTupleOfFiles('W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data','W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/201806031226-Proprio/201806031226-Proprio-Trial001-1.avi', message = "Which file would you like stills from?")
 
     capVideoDummy = openVideo(filename_all[0])
 
-    nFrames = capVideoDummy.get(cv2.CAP_PROP_FRAME_COUNT)
+    nFrames = min(capVideoDummy.get(cv2.CAP_PROP_FRAME_COUNT), 1000)
     selection = [round(random.random()*nFrames) for i in range(n)]
     capVideoDummy.release()
+
+    invGamma = 1.0 / gammaValue
+    gammaTable = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
 
     for filename in filename_all:
         filename_root = filename.split('.')[:-1]
@@ -126,12 +136,22 @@ def getNRandomStills(n = 10):
         while cv2.waitKey(1) != ord(' ') and capVideo.isOpened() and countSaved < n:  # until the Esc key is pressed or webcam connection is lost
             blnFrameReadSuccessfully, imgOriginal = capVideo.read()                   # read next frame
             if not blnFrameReadSuccessfully or imgOriginal is None:                   # if frame was not read successfully
-                print "error: frame not read from webcam\n"                           # print error message to std out
+                print("error: frame not read from webcam\n")                           # print error message to std out
                 os.system("pause")                                                    # pause until user presses a key so user can see error message
                 break                                                                 # exit while loop (which exits program)
             if count in selection:
                 #pdb.set_trace()
-                stillName = filename_root[0] + "_randomStill" + "%02d" % countSaved + ".png"
+                stillName = filename_root[0] + "_randomStill" + "%02d" % countSaved + ".bmp"
+                if equalizeFrame:
+                    imgYuv = cv2.cvtColor(imgOriginal, cv2.COLOR_BGR2YUV)
+                    # equalize the histogram of the Y channel
+                    #imgYuv[:,:,0] = cv2.equalizeHist(imgYuv[:,:,0])
+                    clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIPLIMIT, tileGridSize=(8,8))
+                    imgYuv[:,:,0] = clahe.apply(imgYuv[:,:,0])
+                    # convert the YUV image back to RGB format
+                    imgOriginal = cv2.cvtColor(imgYuv, cv2.COLOR_YUV2BGR)
+
+                imgOriginal = cv2.LUT(imgOriginal, gammaTable)
                 cv2.imwrite(stillName, imgOriginal)
                 countSaved += 1
             count += 1
@@ -176,8 +196,9 @@ def getBackprojectedImg(imgOriginal, templateHist, backProjThresh = 50,
 
     return imgProcessedThresholded, imgProcessed, imgMask1Ch
 
-def BackProjectionToVideo(filePath, templatePath, preview = False,
-    DestinationPath = '', OutputType = NONE, overrideNFrames = 0):
+#@profile
+def BackProjectionToVideo(filePath, templatePath, gammaValue = 0.5, equalizeFrame = False, preview = False, stdOut = False,
+    DestinationPath = '', OutputType = NONE, overrideNFrames = 0, backProjThresh = 100, convolutionKernelRadius = 2, lowerValBound = 50, plotName = ''):
 
     capVideo = openVideo(filePath)
 
@@ -198,39 +219,51 @@ def BackProjectionToVideo(filePath, templatePath, preview = False,
         else:
             nFrames = overrideNFrames
     # get image which contains cutouts of the markers
-    maskedTemplate, templateHist = getHSHistogram(templatePath, plotting = preview)
+    maskedTemplate, templateHist = getHSHistogram(templatePath, plotting = preview, lowerValBound = lowerValBound, plotName = plotName)
 
     if preview:
         cv2.namedWindow("Original", cv2.WINDOW_NORMAL)            # create windows, use WINDOW_AUTOSIZE for a fixed window size
         cv2.namedWindow("Processed", cv2.WINDOW_NORMAL)           # or use WINDOW_NORMAL to allow window resizing
 
+    invGamma = 1.0 / gammaValue
+    gammaTable = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+
     count = 0
     while cv2.waitKey(1) != ord(' ') and capVideo.isOpened() and count < nFrames:                # until the Esc key is pressed or webcam connection is lost
         blnFrameReadSuccessfully, imgOriginal = capVideo.read()            # read next frame
 
+        if equalizeFrame:
+            imgYuv = cv2.cvtColor(imgOriginal, cv2.COLOR_BGR2YUV)
+            # equalize the histogram of the Y channel
+            #imgYuv[:,:,0] = cv2.equalizeHist(imgYuv[:,:,0])
+            clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIPLIMIT, tileGridSize=(8,8))
+            imgYuv[:,:,0] = clahe.apply(imgYuv[:,:,0])
+            # convert the YUV image back to RGB format
+            imgOriginal = cv2.cvtColor(imgYuv, cv2.COLOR_YUV2BGR)
+
+        imgOriginal = cv2.LUT(imgOriginal, gammaTable)
+
         if not blnFrameReadSuccessfully or imgOriginal is None:             # if frame was not read successfully
-            print "error: frame not read from video stream\n"                     # print error message to std out
+            print("error: frame not read from video stream\n")                     # print error message to std out
             #pdb.set_trace()
             #os.system("pause")                                              # pause until user presses a key so user can see error message
             break                                                           # exit while loop (which exits program)
 
-        backProjThresh = 50
-
         if OutputType == THRESHOLDED_BACKPROJECTED:
-            imgProcessed,_,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh)
+            imgProcessed,_,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
 
         elif OutputType == BACKPROJECTED:
-            _,imgProcessed,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh)
+            _,imgProcessed,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
 
         elif OutputType == ORIGINAL_BACKPROJECTED:
-            imgProcessedThresholded,_,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh)
+            imgProcessedThresholded,_,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
             imgProcessedThresholded3ch = cv2.merge((imgProcessedThresholded,imgProcessedThresholded,imgProcessedThresholded))
             imgPlaceholder[:h, :w,:] = imgProcessedThresholded3ch
             imgPlaceholder[:h, w:2*w,:] = imgOriginal
             imgProcessed = imgPlaceholder
 
         elif OutputType == BACKPROJECTED_PLUS or BACKPROJECTED_ALT:
-            imgProcessedThresholded, imgProcessed,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh)
+            imgProcessedThresholded, imgProcessed,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
             # threshold and binary AND
             _,imgMask1Ch = cv2.threshold(imgProcessed,backProjThresh,255,cv2.THRESH_BINARY_INV)
 
@@ -246,30 +279,34 @@ def BackProjectionToVideo(filePath, templatePath, preview = False,
                 imgMask1Ch = cv2.morphologyEx(imgMask1Ch, cv2.MORPH_CLOSE,
                     cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(closingKernelRadius,closingKernelRadius)))
 
-            erosionKernelRadius = 50
+            erosionKernelRadius = 150
             if erosionKernelRadius > 1:
                 imgMask1Ch = cv2.morphologyEx(imgMask1Ch, cv2.MORPH_ERODE,
                     cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(erosionKernelRadius,erosionKernelRadius)))
 
-            convolutionKernelRadius = 1
+            maskConvolutionKernelRadius = 100
             if convolutionKernelRadius > 1:
                 imgMask1Ch = cv2.filter2D(imgMask1Ch, -1,
-                    cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(convolutionKernelRadius,convolutionKernelRadius)))
+                    cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(maskConvolutionKernelRadius,maskConvolutionKernelRadius)))
 
             imgMask = cv2.merge((imgMask1Ch,imgMask1Ch,imgMask1Ch))
             imgThresholded = cv2.bitwise_and(imgOriginal,imgMask)
+
             if OutputType == BACKPROJECTED_PLUS:
+                #pdb.set_trace()
                 imgProcessedThresholded3ch = cv2.merge((imgProcessedThresholded,imgProcessedThresholded,imgProcessedThresholded))
-                imgProcessed = cv2.add(imgThresholded/3, imgProcessedThresholded3ch)
+                imgProcessed = (imgThresholded/2).astype(np.uint8) + imgProcessedThresholded3ch
+                imgProcessed[imgProcessed > 255] = 255
             elif OutputType == BACKPROJECTED_ALT:
                 imgProcessed = cv2.merge((3*cv2.cvtColor(imgThresholded, cv2.COLOR_BGR2GRAY),np.zeros((h,w,1),np.uint8),imgProcessedThresholded))
                 #pdb.set_trace()
         else:
-            imgProcessed = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh)
+            imgProcessed = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
 
         if DestinationPath:
-            sys.stdout.write("Process %d: Writing video. %d%%\r" % (RANK,int(count * 100 / nFrames+ 1)))
-            sys.stdout.flush()
+            if stdOut:
+                sys.stdout.write("Process %d: Writing video. %d%%\r" % (RANK,int(count * 100 / nFrames+ 1)))
+                sys.stdout.flush()
             count += 1
             out.write(imgProcessed)
 
@@ -284,10 +321,138 @@ def BackProjectionToVideo(filePath, templatePath, preview = False,
     cv2.destroyAllWindows()                     # remove windows from memory
     return
 
-def batchBackProjectionToVideo(writeVideo = False, OutputType = BACKPROJECTED, overrideNFrames = 0):
+def tuneParameters(gammaValue = 0.5, equalizeFrame = False, seekToFrame = 1, initialDir = "D:/", OutputType = BACKPROJECTED_PLUS):
+
+    root = Tk()
+    root.withdraw() # we don't want a full GUI, so keep the root window from appearing
+    templateFileName = filedialog.askopenfilename(parent = root, title = 'Please select a template', initialdir = initialDir) # open window to get file name
+    videoFileName = filedialog.askopenfilename(parent = root, title = 'Please select a video file', initialdir = initialDir) # open window to get file name
+    cv2.namedWindow("Parameter Tuning", cv2.WINDOW_NORMAL)           # or use WINDOW_NORMAL to allow window resizing
+
+    def nothing(x):
+        pass
+    # create trackbars for color change
+    cv2.createTrackbar('Minimum Lightness',"Parameter Tuning",50,255,nothing)
+    cv2.createTrackbar('Backproj Threshold',"Parameter Tuning",128,255,nothing)
+    cv2.createTrackbar('Kernel Radius',"Parameter Tuning",5,20,nothing)
+    #cv2.createTrackbar('B',"Parameter Tuning",0,255,nothing)
+
+    capVideo = openVideo(videoFileName)
+    w=int(capVideo.get(cv2.CAP_PROP_FRAME_WIDTH ))
+    h=int(capVideo.get(cv2.CAP_PROP_FRAME_HEIGHT ))
+    imgPlaceholder = np.zeros((h,2*w, 3), np.uint8)
+
+    # apply gamma correction to frame
+    invGamma = 1.0 / gammaValue
+    gammaTable = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+
+    count = 0
+    while cv2.waitKey(1) != ord(' ') and capVideo.isOpened() and count < seekToFrame:                # until the Esc key is pressed or webcam connection is lost
+        blnFrameReadSuccessfully, imgOriginal = capVideo.read()            # read next frame
+        count += 1
+
+    if equalizeFrame:
+        imgYuv = cv2.cvtColor(imgOriginal, cv2.COLOR_BGR2YUV)
+        # equalize the histogram of the Y channel
+        #imgYuv[:,:,0] = cv2.equalizeHist(imgYuv[:,:,0])
+        clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIPLIMIT, tileGridSize=(8,8))
+        imgYuv[:,:,0] = clahe.apply(imgYuv[:,:,0])
+        # convert the YUV image back to RGB format
+        imgOriginal = cv2.cvtColor(imgYuv, cv2.COLOR_YUV2BGR)
+
+    imgOriginal = cv2.LUT(imgOriginal, gammaTable)
+    imgProcessed = imgOriginal
+
+    lowerValBound = cv2.getTrackbarPos('Minimum Lightness',"Parameter Tuning")
+    backProjThresh = cv2.getTrackbarPos('Backproj Threshold',"Parameter Tuning")
+    convolutionKernelRadius = cv2.getTrackbarPos('Kernel Radius',"Parameter Tuning")
+    #Initialize template
+    maskedTemplate, templateHist = getHSHistogram(templateFileName, plotting = False, lowerValBound = lowerValBound)
+
+    while(1):
+        cv2.imshow("Parameter Tuning",imgProcessed)
+        k = cv2.waitKey(1) & 0xFF
+        if k == 27:
+            break
+
+        # get current positions of four trackbars
+        newLowerValBound = cv2.getTrackbarPos('Minimum Lightness',"Parameter Tuning")
+        newBackProjThresh = cv2.getTrackbarPos('Backproj Threshold',"Parameter Tuning")
+        newConvolutionKernelRadius = cv2.getTrackbarPos('Kernel Radius',"Parameter Tuning")
+        #b = cv2.getTrackbarPos('B','image')
+
+        if lowerValBound != newLowerValBound:
+            lowerValBound = newLowerValBound
+            maskedTemplate, templateHist = getHSHistogram(templateFileName, plotting = False, lowerValBound = lowerValBound)
+            #force recompute by setting backProjThresh to 0
+            backProjThresh = 0
+
+        if backProjThresh != newBackProjThresh or convolutionKernelRadius != newConvolutionKernelRadius:
+            backProjThresh = newBackProjThresh
+            convolutionKernelRadius = newConvolutionKernelRadius
+
+            if OutputType == THRESHOLDED_BACKPROJECTED:
+                imgProcessed,_,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
+
+            elif OutputType == BACKPROJECTED:
+                _,imgProcessed,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
+
+            elif OutputType == ORIGINAL_BACKPROJECTED:
+                imgProcessedThresholded,_,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
+                imgProcessedThresholded3ch = cv2.merge((imgProcessedThresholded,imgProcessedThresholded,imgProcessedThresholded))
+                imgPlaceholder[:h, :w,:] = imgProcessedThresholded3ch
+                imgPlaceholder[:h, w:2*w,:] = imgOriginal
+                imgProcessed = imgPlaceholder
+
+            elif OutputType == BACKPROJECTED_PLUS or BACKPROJECTED_ALT:
+                imgProcessedThresholded, imgProcessed,_ = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
+                # threshold and binary AND
+                _,imgMask1Ch = cv2.threshold(imgProcessed,backProjThresh,255,cv2.THRESH_BINARY_INV)
+
+                # Open image to remove small islands
+                openingKernelRadius = 5
+                if openingKernelRadius > 1:
+                    imgMask1Ch = cv2.morphologyEx(imgMask1Ch, cv2.MORPH_OPEN,
+                        cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(openingKernelRadius,openingKernelRadius)))
+
+                # Open image to remove small islands
+                closingKernelRadius = 5
+                if closingKernelRadius > 1:
+                    imgMask1Ch = cv2.morphologyEx(imgMask1Ch, cv2.MORPH_CLOSE,
+                        cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(closingKernelRadius,closingKernelRadius)))
+
+                erosionKernelRadius = 150
+                if erosionKernelRadius > 1:
+                    imgMask1Ch = cv2.morphologyEx(imgMask1Ch, cv2.MORPH_ERODE,
+                        cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(erosionKernelRadius,erosionKernelRadius)))
+
+                maskConvolutionKernelRadius = 100
+                if convolutionKernelRadius > 1:
+                    imgMask1Ch = cv2.filter2D(imgMask1Ch, -1,
+                        cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(maskConvolutionKernelRadius,maskConvolutionKernelRadius)))
+
+                imgMask = cv2.merge((imgMask1Ch,imgMask1Ch,imgMask1Ch))
+                imgThresholded = cv2.bitwise_and(imgOriginal,imgMask)
+
+                if OutputType == BACKPROJECTED_PLUS:
+                    #pdb.set_trace()
+                    imgProcessedThresholded3ch = cv2.merge((imgProcessedThresholded,imgProcessedThresholded,imgProcessedThresholded))
+                    imgProcessed = (imgThresholded/2).astype(np.uint8) + imgProcessedThresholded3ch
+                    imgProcessed[imgProcessed > 255] = 255
+                elif OutputType == BACKPROJECTED_ALT:
+                    imgProcessed = cv2.merge((3*cv2.cvtColor(imgThresholded, cv2.COLOR_BGR2GRAY),np.zeros((h,w,1),np.uint8),imgProcessedThresholded))
+                    #pdb.set_trace()
+            else:
+                imgProcessed = getBackprojectedImg(imgOriginal, templateHist, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius)
+
+    cv2.destroyAllWindows()
+    #pdb.set_trace()
+    return
+
+def batchBackProjectionToVideo(writeVideo = False, OutputType = BACKPROJECTED, gammaValue = 0.5, equalizeFrame = False, overrideNFrames = 0, preview = True, backProjThresh = [100], convolutionKernelRadius = [3], lowerValBound = [50]):
     if RANK == 0:
-        filename_all, filename_path = getTupleOfFiles('D:/Sensitive_Data', 'D:/Sensitive_Data/201609191116-Boomer_Predox_Baseline_Treadmill/decrypt/201609191116-Boomer_Predox_Baseline_Treadmill_Ultraviolet_10-1.avi', message = "Which video file(s) would you like to use?")
-        templatename_all, templatename_path = getTupleOfFiles('D:/Sensitive_Data', 'D:/Sensitive_Data/201609191116-Boomer_Predox_Baseline_Treadmill/decrypt/tiledTemplate.png', message = "Which file would you like to use as template(s)?")
+        filename_all, filename_path = getTupleOfFiles('W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/201806031226-Proprio', 'W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/201806031226-Proprio/201806031226-Proprio-Trial001-1.avi', message = "Which video file(s) would you like to use?")
+        templatename_all, templatename_path = getTupleOfFiles('W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/201806031226-Proprio/templates', 'W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/201806031226-Proprio/templates/tiledTemplate-1.png', message = "Which file would you like to use as template(s)?")
 
         destination_filename_all = []
         if writeVideo:
@@ -297,7 +462,7 @@ def batchBackProjectionToVideo(writeVideo = False, OutputType = BACKPROJECTED, o
                 root.withdraw() # we don't want a full GUI, so keep the root window from appearing
                 filename_root = filePath.split(".")
                 filename_processed = filename_root[0] + '-Processed.avi'
-                filename = asksaveasfilename(parent = root, title = 'Please Name Processed file', initialfile = filename_processed) # open window to get file name
+                filename = filedialog.asksaveasfilename(parent = root, title = 'Please Name Processed file', initialfile = filename_processed) # open window to get file name
                 destination_filename_all.append(filename)
     else:
         filename_all = None
@@ -313,8 +478,9 @@ def batchBackProjectionToVideo(writeVideo = False, OutputType = BACKPROJECTED, o
     for i,filenames in enumerate(zip(filename_all,templatename_all, destination_filename_all)):
         if divmod(i, SIZE)[1] == RANK:
             print("Writing video %d of %d on process %d" % (i+1, len(filename_all),RANK))
-            BackProjectionToVideo(filenames[0], filenames[1], preview = False,
-            DestinationPath = filenames[2], OutputType = OutputType, overrideNFrames = overrideNFrames)
+            # add code to fix the thresholds if only one was provided # TODO:
+            BackProjectionToVideo(filenames[0], filenames[1], gammaValue = gammaValue, equalizeFrame = equalizeFrame, preview = preview, stdOut = RANK == 0,
+            DestinationPath = filenames[2], OutputType = OutputType, overrideNFrames = overrideNFrames, backProjThresh = backProjThresh[RANK], convolutionKernelRadius = convolutionKernelRadius[RANK], lowerValBound = lowerValBound[RANK], plotName = '%s' % RANK)
 
     #for filenames in zip(filename_all,templatename_all, destination_filename_all):
     #    print("Writing video %d of %d" % (count+1, len(filename_all)))
@@ -323,7 +489,25 @@ def batchBackProjectionToVideo(writeVideo = False, OutputType = BACKPROJECTED, o
     #    count += 1
 ###################################################################################################
 if __name__ == "__main__":
-    #getNRandomStills(20)
-    #for i in range(7):
+    gammaValue = 0.75
+    equalizeFrame = True
+
+    #getNRandomStills(5, gammaValue = gammaValue, equalizeFrame = equalizeFrame)
+
+    #for i in range(4):
     #    tileStills()
-    batchBackProjectionToVideo(writeVideo = True, OutputType = ORIGINAL_BACKPROJECTED, overrideNFrames = 2000)
+
+    #backProjThresh = 150
+    #convolutionKernelRadius = 5
+    #lowerValBound = 225
+    #whichVideo = 4
+    #BackProjectionToVideo('W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/201807020343-Proprio/201807020343-Proprio-Trial001-%s.avi' % whichVideo, 'W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/201807020343-Proprio/templates/tiledTemplate-%s.bmp' % whichVideo, gammaValue = gammaValue, equalizeFrame = True, preview = False,
+    #DestinationPath = 'W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/201807020343-Proprio/201807020343-Proprio-Trial001-%s-Processed.avi' % whichVideo, OutputType = ORIGINAL_BACKPROJECTED, overrideNFrames = 5, backProjThresh = backProjThresh, convolutionKernelRadius = convolutionKernelRadius, lowerValBound = lowerValBound, plotName = '%s' % 1)
+
+    #initialDir = 'W:/ENG_Neuromotion_Shared/group/Proprioprosthetics/Data/'
+    #initialDir = 'D:/'
+    #tuneParameters(gammaValue = gammaValue, equalizeFrame = equalizeFrame, initialDir = initialDir, OutputType = BACKPROJECTED_PLUS)
+    bPThresh = [200,100,150,200]
+    cvRad = [3 for i in range(4)]
+    lowValBound = [240,50,50,240]
+    batchBackProjectionToVideo(writeVideo = True, OutputType = BACKPROJECTED_PLUS, gammaValue = gammaValue, equalizeFrame = equalizeFrame, overrideNFrames = None, preview = False, backProjThresh = bPThresh, convolutionKernelRadius = cvRad, lowerValBound = lowValBound)
