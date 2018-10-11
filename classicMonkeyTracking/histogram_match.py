@@ -256,53 +256,80 @@ def getMIP(folderPath, fileName, nFrames = 10):
     filePath = os.path.join(folderPath, fileName + '.avi')
     capVideo = openVideo(filePath)
 
-    frameCount = capVideo.get(cv2.CAP_PROP_FRAME_COUNT)
+    frameCount = int(capVideo.get(cv2.CAP_PROP_FRAME_COUNT))
     nFrames = min(frameCount, nFrames)
 
-    frameSubset = sorted(random.sample(list(range(frameCount)),nStills))
+    frameSubset = sorted(random.sample(list(range(frameCount)),nFrames))
 
     success, img = capVideo.read()
     height, width = img.shape[:2]
-
+    allImg = np.zeros((height,width, nFrames), dtype = np.uint8)
     for idx, stillNo in enumerate(frameSubset):
         capVideo.set(cv2.CAP_PROP_POS_FRAMES, stillNo)
         success, img = capVideo.read()
-        pdb.set_trace()
+        allImg[:,:,idx] = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    capVideo.release()
+    return allImg.max(axis = 2)
 
-def getCropOrigin(folderPath, fileName, width, height):
-    filePath = os.path.join(folderPath, fileName + '.avi')
-    capVideo = openVideo(filePath)
-    success, imgOriginal = capVideo.read()
+def getCropOrigin(folderPath, fileName, width = None, height = None):
+    imgOriginal = getMIP(folderPath, fileName, nFrames = 50)
     img = imgOriginal.copy()
     cv2.namedWindow("Get Crop Origin", cv2.WINDOW_AUTOSIZE)
     cv2.imshow("Get Crop Origin", img)
 
-    getCropOrigin.clickHappened = False
-    getCropOrigin.origin = [0,0]
-    def click(event, x, y, flags, param):
+    getCropOrigin.done = False
+    getCropOrigin.x = 0
+    getCropOrigin.y = 0
 
-        if event == cv2.EVENT_LBUTTONUP:
-            getCropOrigin.origin = [x,y]
-            getCropOrigin.clickHappened = True
-            print('%s: Bounds are:' % fileName)
-            print('x1:%d x2:%d y1:%d y2:%d' % (x, x+width, y, y+height))
+    getCropOrigin.width = width
+    getCropOrigin.height = height
 
-        elif event == cv2.EVENT_MOUSEMOVE:
-            img = imgOriginal.copy()
-            cv2.rectangle(img, (x,y), (x+width, y+height), (0,0,255))
-            cv2.imshow("Get Crop Origin", img)
+    if width is None or height is None:
+        getCropOrigin.settingOrigin = True
+
+        def click(event, x, y, flags, param):
+            if getCropOrigin.settingOrigin:
+                if event == cv2.EVENT_LBUTTONUP:
+                    getCropOrigin.x, getCropOrigin.y = x,y
+                    getCropOrigin.settingOrigin = False
+                    print('%s: origin at:' % fileName)
+                    print('x1:%d y1:%d' % (x, y))
+            else:
+                if event == cv2.EVENT_LBUTTONUP:
+                    getCropOrigin.width, getCropOrigin.height =\
+                        [x - getCropOrigin.x,y - getCropOrigin.y]
+
+                    getCropOrigin.done = True
+                    print('%s: extent at:' % fileName)
+                    print('x2:%d y2:%d' % (x, y))
+                elif event == cv2.EVENT_MOUSEMOVE:
+                    img = imgOriginal.copy()
+                    cv2.rectangle(img, (getCropOrigin.x,
+                        getCropOrigin.y), (x, y), (0,0,255))
+                    cv2.imshow("Get Crop Origin", img)
+    else:
+        def click(event, x, y, flags, param):
+            if event == cv2.EVENT_LBUTTONUP:
+                getCropOrigin.x, getCropOrigin.y = x,y
+                getCropOrigin.done = True
+                print('%s: Bounds are:' % fileName)
+                print('x1:%d x2:%d y1:%d y2:%d' % (x, x+width, y, y+height))
+
+            elif event == cv2.EVENT_MOUSEMOVE:
+                img = imgOriginal.copy()
+                cv2.rectangle(img, (x,y), (x+width, y+height), (0,0,255))
+                cv2.imshow("Get Crop Origin", img)
 
     cv2.setMouseCallback("Get Crop Origin", click)
     # keep looping until the 'q' key is pressed
     while True:
         # display the image and wait for a keypress
         key = cv2.waitKey(1) & 0xFF
-        if key == 27 or getCropOrigin.clickHappened:
+        if key == 27 or getCropOrigin.done:
             break
     # close all open windows
-    capVideo.release()
     cv2.destroyAllWindows()
-    return getCropOrigin.origin
+    return getCropOrigin.x,getCropOrigin.y, getCropOrigin.width, getCropOrigin.height
 
 def getSpecificStills(folderPath, fileName, listOfStills, outputFolder = '',
     prevIdx = 0, crop = None):
