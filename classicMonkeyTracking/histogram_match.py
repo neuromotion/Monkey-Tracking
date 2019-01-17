@@ -199,27 +199,36 @@ Count	6
         f.write(modColumnHeader)
         annotationsDF.to_csv(f, sep = '\t', index = False, header = False)
 
-def rotateAndCropAnnotations(folderPath, fileName, angle = None, crop = None, outputFolder = '',
+def rotate(x,y,xo,yo,theta): #rotate x,y around xo,yo by theta (rad)
+    xr = math.cos(theta)*(x-xo) - math.sin(theta)*(y-yo) + xo
+    yr = math.sin(theta)*(x-xo) + math.cos(theta)*(y-yo) + yo
+    #pdb.set_trace()
+    return xr,yr
+
+def getRotatedExtents(angle, origWidth, origHeight):
+    corner01x, corner01y = rotate(0,origHeight,0, 0, math.radians(angle))
+    corner10x, corner10y = rotate(origWidth,0,0, 0, math.radians(angle))
+    corner11x, corner11y = rotate(origWidth,origHeight,0, 0, math.radians(angle))
+
+    newOriginX = min(corner01x, corner10x, corner11x)
+    newOriginY = min(corner01y, corner10y, corner11y)
+    newWidth = max(corner01x, corner10x, corner11x) - newOriginX
+    newHeight = max(corner01y, corner10y, corner11y) - newOriginY
+
+    return math.floor(newOriginX), math.floor(newOriginY),\
+        math.floor(newWidth), math.floor(newHeight)
+
+def rotateAndCropAnnotations(folderPath, fileName, angle = None, crop = None,
+    outputFolder = '',
     origWidth = 1900, origHeight = 1000):
     # clockwise rotations
     simiDataPath = os.path.join(folderPath, fileName + '.p')
     simiData = pd.read_csv(simiDataPath, sep = '\t', skiprows = 9)
     destinationPath = os.path.join(folderPath, outputFolder, fileName + '-rotated.p')
 
-    def rotate(x,y,xo,yo,theta): #rotate x,y around xo,yo by theta (rad)
-        xr = math.cos(theta)*(x-xo) - math.sin(theta)*(y-yo) + xo
-        yr = math.sin(theta)*(x-xo) + math.cos(theta)*(y-yo) + yo
-        return xr,yr
-
     if angle is not None:
-        corner01x, corner01y = rotate(0,origHeight,0, 0, math.radians(angle))
-        corner10x, corner10y = rotate(origWidth,0,0, 0, math.radians(angle))
-        corner11x, corner11y = rotate(origWidth,origHeight,0, 0, math.radians(angle))
-
-        newOriginX = min(corner01x, corner10x, corner11x)
-        newOriginY = min(corner01y, corner10y, corner11y)
-        newWidth = max(corner01x, corner10x, corner11x) - newOriginX
-        newHeight = max(corner01y, corner10y, corner11y) - newOriginY
+        newOriginX, newOriginY, newWidth, newHeight =\
+            getRotatedExtents(angle, origWidth, origHeight)
     else:
         newOriginX = 0
         newOriginY = 0
@@ -389,7 +398,7 @@ def saveDeepLabCutTrainingData(folderPath, fileInfo, nStills = 50,
     frameSubset = sorted(random.sample(list(allIndices),nStills))
     #frameSubset = [0, 1, 2]
     outputFolder = os.path.join('training', fileInfo['name'])
-
+    #pdb.set_trace()
     if not os.path.exists(os.path.join(folderPath, outputFolder)):
         os.makedirs(os.path.join(folderPath, outputFolder))
 
@@ -417,20 +426,46 @@ def saveDeepLabCutTrainingData(folderPath, fileInfo, nStills = 50,
             outputs[jointName].to_csv(f, sep = '\t', index = False)
 
 def saveDeepLabCutAnnotationsToSimi(folderPath, fileName,
-    outputFolder = '', pCutoff = 0.5, origSize = (1900, 1000)):
+    outputFolder = '', pCutoff = 0.5, params = None):
 
     annotations = pd.read_hdf(os.path.join(folderPath, fileName + '.h5'))
-    origWidth, origHeight = origSize
+    
+    #origWidth, origHeight = origSize
     for scorer, annThisScorer in annotations.groupby(axis = 1, level = 'scorer'):
         annThisScorer.columns = annThisScorer.columns.droplevel()
+        #pdb.set_trace()
         confidenceVals = annThisScorer.xs('likelihood', level = 'coords', axis = 1)
-        confidenceMask = confidenceVals < pCutoff
-        annThisScorer.loc[:,(slice(None), 'x')][confidenceMask] = np.nan
-        annThisScorer.loc[:,(slice(None), 'y')][confidenceMask] = np.nan
+        maskConfident = confidenceVals > pCutoff
+        annThisScorer.loc[:,(slice(None), 'x')] = annThisScorer.loc[:,(slice(None), 'x')].where(maskConfident, other = np.nan)
+        annThisScorer.loc[:,(slice(None), 'y')] = annThisScorer.loc[:,(slice(None), 'y')].where(maskConfident, other = np.nan)
 
         annThisScorer.drop('likelihood', axis = 1, level = 'coords', inplace = True)
-        annThisScorer.loc[:,(slice(None), 'x')] = annThisScorer.loc[:,(slice(None), 'x')] / origWidth
-        annThisScorer.loc[:,(slice(None), 'y')] = annThisScorer.loc[:,(slice(None), 'y')] / origHeight
+        annThisScorer.loc[:,(slice(None), 'x')] = annThisScorer.loc[:,(slice(None), 'x')] + params['crop'][0]
+        annThisScorer.loc[:,(slice(None), 'y')] = annThisScorer.loc[:,(slice(None), 'y')] + params['crop'][1]
+        #pdb.set_trace()
+        if not np.isnan(params['rotate']):
+            newOriginX, newOriginY, newWidth, newHeight = getRotatedExtents(\
+                -params['rotate'],
+                params['origSize'][0], params['origSize'][1])
+            params['origSize'][0], params['origSize'][1] = newWidth, newHeight
+
+            for joint, annThisJoint in annThisScorer.groupby(axis = 1, level = 'bodyparts'):
+
+                annThisScorer.loc[:,(joint, 'x')], annThisScorer.loc[:,(joint, 'y')] =\
+                    rotate(annThisScorer.loc[:,(joint, 'x')],
+                        annThisScorer.loc[:,(joint, 'y')],
+                        0,0,math.radians(-params['rotate']))
+                #pdb.set_trace()
+                annThisScorer.loc[:,(joint, 'x')] =\
+                    annThisScorer.loc[:,(joint, 'x')] - newOriginX
+                annThisScorer.loc[:,(joint, 'y')] =\
+                    annThisScorer.loc[:,(joint, 'y')] - newOriginY
+            #
+
+        annThisScorer.loc[:,(slice(None), 'x')] =\
+            annThisScorer.loc[:,(slice(None), 'x')] / params['origSize'][0]
+        annThisScorer.loc[:,(slice(None), 'y')] =\
+            annThisScorer.loc[:,(slice(None), 'y')] / params['origSize'][1]
 
         d = dict(zip(annThisScorer.columns.levels[1],
             [i.capitalize() for i in annThisScorer.columns.levels[1]]))
