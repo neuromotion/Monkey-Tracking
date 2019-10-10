@@ -183,16 +183,17 @@ def rotateAndCropVideo(folderPath, fileName, angle = None, crop = None,
     out.release()
 
 def saveSimiAnnotations(annotationsDF, outputPath):
-    simiHeader = """FileType	RawData
-Version	150
-Name	Raw data
-Samples	189788
-TimeOffset	0.000000
-SamplesPerSecond	100.000000
-Count	6
-
-1000001	1000001	1000002	1000002	1000003	1000003	1000004	1000004	1000005	1000005	1000007	1000007
-"""
+    simiHeader = """
+        FileType	RawData
+        Version	150
+        Name	Raw data
+        Samples	189788
+        TimeOffset	0.000000
+        SamplesPerSecond	100.000000
+        Count	6
+        
+        1000001	1000001	1000002	1000002	1000003	1000003	1000004	1000004	1000005	1000005	1000007	1000007
+        """
     modColumnHeader = '\t'.join([colName[:-2] for colName in annotationsDF.columns]) + '\n'
     with open(outputPath, 'w') as f:
         f.write(simiHeader)

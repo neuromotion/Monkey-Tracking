@@ -70,22 +70,22 @@ if extractTheTrainingData:
     'name' : '201806031226-Proprio-Trial001-1-rotated',
     'mustHaveJoints' : ["C_Right", "GT_Right", "K_Right","M_Right", "MT_Right"],
     'specificRange' : None,
-    'crop' : (0,0,cropWidth, cropHeight)
+    'crop' : (0,0, cropWidth, cropHeight)
     },{
     'name' : '201806031226-Proprio-Trial001-2-rotated',
     'mustHaveJoints' : ["C_Right", "GT_Right","M_Right", "MT_Right","C_Left"],
     'specificRange' : None,
-    'crop' : (0,0,cropWidth, cropHeight)
+    'crop' : (0,0, cropWidth, cropHeight)
     },{
     'name' : '201806031226-Proprio-Trial001-3-rotated',
     'mustHaveJoints' : ["C_Right", "GT_Right", "K_Right","M_Right", "MT_Right","C_Left"],
     'specificRange' : None,
-    'crop' : (0,0,cropWidth, cropHeight)
+    'crop' : (0,0, cropWidth, cropHeight)
     },{
     'name' : '201806031226-Proprio-Trial001-4-rotated',
     'mustHaveJoints' : ["GT_Right", "K_Right","M_Right", "MT_Right"],
     'specificRange' : None,
-    'crop' : (0,0,cropWidth, cropHeight)
+    'crop' : (0,0, cropWidth, cropHeight)
     }]
 
     for idx, fileInfo in enumerate(fileInfos):
